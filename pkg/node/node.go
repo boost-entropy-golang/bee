@@ -148,7 +148,6 @@ type Options struct {
 	SwapEnable                 bool
 	ChequebookEnable           bool
 	FullNodeMode               bool
-	ChainEnable                bool
 	Transaction                string
 	BlockHash                  string
 	PostageContractAddress     string
@@ -253,7 +252,7 @@ func NewBee(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, s
 		erc20Service       erc20.Service
 	)
 
-	chainEnabled := isChainEnabled(o, logger)
+	chainEnabled := isChainEnabled(o, o.SwapEndpoint, logger)
 
 	var batchStore postage.Storer = new(postage.NoOpBatchStore)
 	var unreserveFn func([]byte, uint8) (uint64, error)
@@ -303,7 +302,7 @@ func NewBee(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, s
 	beeNodeMode := api.LightMode
 	if o.FullNodeMode {
 		beeNodeMode = api.FullMode
-	} else if !o.ChainEnable {
+	} else if !chainEnabled {
 		beeNodeMode = api.UltraLightMode
 	}
 
@@ -345,11 +344,6 @@ func NewBee(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, s
 		b.debugAPIServer = debugAPIServer
 	}
 
-	apiListener, err := net.Listen("tcp", o.APIAddr)
-	if err != nil {
-		return nil, fmt.Errorf("api listener: %w", err)
-	}
-
 	var apiService *api.Service
 
 	if o.Restricted {
@@ -361,6 +355,11 @@ func NewBee(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, s
 			ReadHeaderTimeout: 3 * time.Second,
 			Handler:           apiService,
 			ErrorLog:          log.New(b.errorLogWriter, "", 0),
+		}
+
+		apiListener, err := net.Listen("tcp", o.APIAddr)
+		if err != nil {
+			return nil, fmt.Errorf("api listener: %w", err)
 		}
 
 		go func() {
@@ -686,7 +685,7 @@ func NewBee(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, s
 	}
 
 	kad, err := kademlia.New(swarmAddress, addressbook, hive, p2ps, pingPong, metricsDB, logger,
-		kademlia.Options{Bootnodes: bootnodes, BootnodeMode: o.BootnodeMode, StaticNodes: o.StaticNodes, IgnoreRadius: !o.ChainEnable})
+		kademlia.Options{Bootnodes: bootnodes, BootnodeMode: o.BootnodeMode, StaticNodes: o.StaticNodes, IgnoreRadius: !chainEnabled})
 	if err != nil {
 		return nil, fmt.Errorf("unable to create kademlia: %w", err)
 	}
@@ -920,6 +919,12 @@ func NewBee(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, s
 				Handler:           apiService,
 				ErrorLog:          log.New(b.errorLogWriter, "", 0),
 			}
+
+			apiListener, err := net.Listen("tcp", o.APIAddr)
+			if err != nil {
+				return nil, fmt.Errorf("api listener: %w", err)
+			}
+
 			go func() {
 				logger.Infof("api address: %s", apiListener.Addr())
 				if err := apiServer.Serve(apiListener); err != nil && err != http.ErrServerClosed {
@@ -1148,8 +1153,8 @@ func (b *Bee) Shutdown() error {
 
 var ErrShutdownInProgress error = errors.New("shutdown in progress")
 
-func isChainEnabled(o *Options, logger logging.Logger) bool {
-	chainDisabled := !o.ChainEnable
+func isChainEnabled(o *Options, swapEndpoint string, logger logging.Logger) bool {
+	chainDisabled := swapEndpoint == ""
 	lightMode := !o.FullNodeMode
 
 	if lightMode && chainDisabled { // ultra light mode is LightNode mode with chain disabled
