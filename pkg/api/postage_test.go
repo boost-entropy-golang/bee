@@ -26,6 +26,7 @@ import (
 	contractMock "github.com/ethersphere/bee/pkg/postage/postagecontract/mock"
 	postagetesting "github.com/ethersphere/bee/pkg/postage/testing"
 	"github.com/ethersphere/bee/pkg/sctx"
+	"github.com/ethersphere/bee/pkg/transaction/backendmock"
 )
 
 func TestPostageCreateStamp(t *testing.T) {
@@ -201,15 +202,17 @@ func TestPostageCreateStamp(t *testing.T) {
 }
 
 func TestPostageGetStamps(t *testing.T) {
-	b := postagetesting.MustNewBatch()
-	b.Value = big.NewInt(20)
+	b := postagetesting.MustNewBatch(postagetesting.WithValue(20))
+
 	si := postage.NewStampIssuer("", "", b.ID, big.NewInt(3), 11, 10, 1000, true)
 	mp := mockpost.New(mockpost.WithIssuer(si))
 	cs := &postage.ChainState{Block: 10, TotalAmount: big.NewInt(5), CurrentPrice: big.NewInt(2)}
-	bs := mock.New(mock.WithChainState(cs), mock.WithBatch(b))
-	ts, _, _, _ := newTestServer(t, testServerOptions{DebugAPI: true, Post: mp, BatchStore: bs, BlockTime: big.NewInt(2)})
 
 	t.Run("single stamp", func(t *testing.T) {
+
+		bs := mock.New(mock.WithChainState(cs), mock.WithBatch(b))
+		ts, _, _, _ := newTestServer(t, testServerOptions{DebugAPI: true, Post: mp, BatchStore: bs, BlockTime: big.NewInt(2)})
+
 		jsonhttptest.Request(t, ts, http.MethodGet, "/stamps", http.StatusOK,
 			jsonhttptest.WithExpectedJSONResponse(&api.PostageStampsResponse{
 				Stamps: []api.PostageStampResponse{
@@ -225,6 +228,36 @@ func TestPostageGetStamps(t *testing.T) {
 						ImmutableFlag: si.ImmutableFlag(),
 						Exists:        true,
 						BatchTTL:      15, // ((value-totalAmount)/pricePerBlock)*blockTime=((20-5)/2)*2.
+					},
+				},
+			}),
+		)
+	})
+
+	t.Run("expired batch", func(t *testing.T) {
+
+		bsForNonExistingBatch := mock.New(mock.WithChainState(cs))
+		tsForNonExistingBatch, _, _, _ := newTestServer(t, testServerOptions{DebugAPI: true, Post: mp, BatchStore: bsForNonExistingBatch, BlockTime: big.NewInt(2)})
+
+		jsonhttptest.Request(t, tsForNonExistingBatch, http.MethodGet, "/stamps", http.StatusOK,
+			jsonhttptest.WithExpectedJSONResponse(&api.PostageStampsResponse{Stamps: []api.PostageStampResponse{}}),
+		)
+
+		jsonhttptest.Request(t, tsForNonExistingBatch, http.MethodGet, "/stamps?all=true", http.StatusOK,
+			jsonhttptest.WithExpectedJSONResponse(&api.PostageStampsResponse{
+				Stamps: []api.PostageStampResponse{
+					{
+						BatchID:       b.ID,
+						Utilization:   si.Utilization(),
+						Usable:        false,
+						Label:         si.Label(),
+						Depth:         si.Depth(),
+						Amount:        bigint.Wrap(si.Amount()),
+						BucketDepth:   si.BucketDepth(),
+						BlockNumber:   si.BlockNumber(),
+						ImmutableFlag: si.ImmutableFlag(),
+						Exists:        false,
+						BatchTTL:      -1,
 					},
 				},
 			}),
@@ -391,9 +424,13 @@ func TestChainState(t *testing.T) {
 		ts, _, _, _ := newTestServer(t, testServerOptions{
 			DebugAPI:   true,
 			BatchStore: mock.New(mock.WithChainState(cs)),
+			BackendOpts: []backendmock.Option{backendmock.WithBlockNumberFunc(func(ctx context.Context) (uint64, error) {
+				return 1, nil
+			})},
 		})
 		jsonhttptest.Request(t, ts, http.MethodGet, "/chainstate", http.StatusOK,
 			jsonhttptest.WithExpectedJSONResponse(&api.ChainStateResponse{
+				ChainTip:     1,
 				Block:        123456,
 				TotalAmount:  bigint.Wrap(big.NewInt(50)),
 				CurrentPrice: bigint.Wrap(big.NewInt(5)),
@@ -401,15 +438,6 @@ func TestChainState(t *testing.T) {
 		)
 	})
 
-	t.Run("empty", func(t *testing.T) {
-		ts, _, _, _ := newTestServer(t, testServerOptions{
-			DebugAPI:   true,
-			BatchStore: mock.New(),
-		})
-		jsonhttptest.Request(t, ts, http.MethodGet, "/chainstate", http.StatusOK,
-			jsonhttptest.WithExpectedJSONResponse(&api.ChainStateResponse{}),
-		)
-	})
 }
 
 func TestPostageTopUpStamp(t *testing.T) {
