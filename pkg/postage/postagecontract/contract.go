@@ -117,7 +117,7 @@ func (c *postageContract) sendTransaction(ctx context.Context, callData []byte, 
 		To:          &c.postageContractAddress,
 		Data:        callData,
 		GasPrice:    sctx.GetGasPrice(ctx),
-		GasLimit:    160000,
+		GasLimit:    1600000,
 		Value:       big.NewInt(0),
 		Description: desc,
 	}
@@ -246,7 +246,6 @@ func (c *postageContract) CreateBatch(ctx context.Context, initialBalance *big.I
 			}
 
 			batchID := createdEvent.BatchId[:]
-
 			err = c.postageService.Add(postage.NewStampIssuer(
 				label,
 				c.owner.Hex(),
