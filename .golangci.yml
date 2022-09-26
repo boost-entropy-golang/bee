@@ -4,7 +4,6 @@ linters:
   enable:
     - asciicheck
     - bidichk
-    - deadcode
     - depguard
     - dogsled
     - durationcheck
@@ -28,14 +27,14 @@ linters:
     - noctx
     - paralleltest
     - prealloc
+    - predeclared
     - promlinter
     - staticcheck
-    - structcheck
     - thelper
+    - tparallel
     - typecheck
     - unconvert
     - unused
-    - varcheck
     - wastedassign
 
 linters-settings:
@@ -123,8 +122,6 @@ issues:
       path: pkg/puller
     - linters: paralleltest
       path: pkg/manifest
-    - linters: paralleltest
-      path: pkg/api
     - linters: paralleltest
       path: pkg/retrieval
     - linters: paralleltest
