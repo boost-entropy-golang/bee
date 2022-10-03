@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethersphere/bee/pkg/crypto"
 	"github.com/ethersphere/bee/pkg/log"
 	"github.com/ethersphere/bee/pkg/postage"
 	"github.com/ethersphere/bee/pkg/storage"
@@ -31,7 +32,7 @@ type Sampler interface {
 }
 
 type Monitor interface {
-	IsStable() bool
+	IsFullySynced() bool
 }
 
 type IncentivesContract interface {
@@ -41,11 +42,11 @@ type IncentivesContract interface {
 	Claim(context.Context) error
 	Commit(context.Context, []byte) error
 	Reveal(context.Context, uint8, []byte, []byte) error
-	WrapCommit(uint8, []byte, []byte, []byte) ([]byte, error)
 }
 
 type Agent struct {
 	logger   log.Logger
+	metrics  metrics
 	backend  ChainBackend
 	monitor  Monitor
 	contract IncentivesContract
@@ -68,6 +69,7 @@ func New(
 
 	s := &Agent{
 		overlay:  overlay,
+		metrics:  newMetrics(),
 		backend:  backend,
 		logger:   logger.WithName(loggerName).Register(),
 		contract: incentives,
@@ -230,11 +232,6 @@ func (s *Agent) start(blockTime time.Duration, blocksPerRound, blocksPerPhase ui
 		case <-time.After(blockTime * time.Duration(checkEvery)):
 		}
 
-		// skip when the depthmonitor is unstable
-		if !s.monitor.IsStable() {
-			continue
-		}
-
 		block, err := s.backend.BlockNumber(context.Background())
 		if err != nil {
 			s.logger.Error(err, "getting block number")
@@ -243,6 +240,7 @@ func (s *Agent) start(blockTime time.Duration, blocksPerRound, blocksPerPhase ui
 
 		mtx.Lock()
 		round = block / blocksPerRound
+		s.metrics.Round.Set(float64(round))
 
 		// compute the current phase
 		p := block % blocksPerRound
@@ -255,7 +253,11 @@ func (s *Agent) start(blockTime time.Duration, blocksPerRound, blocksPerPhase ui
 		}
 
 		// write the current phase only once
+
 		if currentPhase != prevPhase {
+
+			s.metrics.CurrentPhase.Set(float64(currentPhase))
+
 			s.logger.Info("entering phase", "phase", currentPhase.String(), "round", round, "block", block)
 
 			phaseEvents.Publish(currentPhase)
@@ -271,10 +273,13 @@ func (s *Agent) start(blockTime time.Duration, blocksPerRound, blocksPerPhase ui
 }
 
 func (s *Agent) reveal(ctx context.Context, storageRadius uint8, sample, obfuscationKey []byte) error {
+	s.metrics.RevealPhase.Inc()
 	return s.contract.Reveal(ctx, storageRadius, sample, obfuscationKey)
 }
 
 func (s *Agent) claim(ctx context.Context) error {
+
+	s.metrics.ClaimPhase.Inc()
 
 	isWinner, err := s.contract.IsWinner(ctx)
 	if err != nil {
@@ -282,6 +287,7 @@ func (s *Agent) claim(ctx context.Context) error {
 	}
 
 	if isWinner {
+		s.metrics.Winner.Inc()
 		err = s.contract.Claim(ctx)
 		if err != nil {
 			return fmt.Errorf("error claiming win: %w", err)
@@ -295,6 +301,12 @@ func (s *Agent) claim(ctx context.Context) error {
 
 func (s *Agent) play(ctx context.Context) (uint8, []byte, error) {
 
+	// get depthmonitor fully synced indicator
+	ready := s.monitor.IsFullySynced()
+	if !ready {
+		return 0, nil, nil
+	}
+
 	storageRadius := s.reserve.GetReserveState().StorageRadius
 
 	isPlaying, err := s.contract.IsPlaying(ctx, storageRadius)
@@ -303,33 +315,38 @@ func (s *Agent) play(ctx context.Context) (uint8, []byte, error) {
 	}
 
 	s.logger.Info("neighbourhood chosen")
+	s.metrics.NeighborhoodSelected.Inc()
 
 	salt, err := s.contract.ReserveSalt(ctx)
 	if err != nil {
 		return 0, nil, err
 	}
 
+	t := time.Now()
 	sample, err := s.sampler.ReserveSample(ctx, salt, storageRadius)
 	if err != nil {
 		return 0, nil, err
 	}
+	s.metrics.SampleDuration.Set(time.Since(t).Seconds())
 
 	return storageRadius, sample.Hash.Bytes(), nil
 }
 
 func (s *Agent) commit(ctx context.Context, storageRadius uint8, sample []byte) ([]byte, error) {
 
+	s.metrics.CommitPhase.Inc()
+
 	key := make([]byte, swarm.HashSize)
 	if _, err := io.ReadFull(rand.Reader, key); err != nil {
 		return nil, err
 	}
 
-	orc, err := s.contract.WrapCommit(storageRadius, sample, s.overlay.Bytes(), key)
+	obfuscatedHash, err := s.wrapCommit(storageRadius, sample, key)
 	if err != nil {
 		return nil, err
 	}
 
-	err = s.contract.Commit(ctx, orc)
+	err = s.contract.Commit(ctx, obfuscatedHash)
 	if err != nil {
 		return nil, err
 	}
@@ -352,4 +369,15 @@ func (s *Agent) Close() error {
 	case <-time.After(5 * time.Second):
 		return errors.New("stopping incentives with ongoing worker goroutine")
 	}
+}
+
+func (s *Agent) wrapCommit(storageRadius uint8, sample []byte, key []byte) ([]byte, error) {
+
+	storageRadiusByte := []byte{storageRadius}
+
+	data := append(s.overlay.Bytes(), storageRadiusByte...)
+	data = append(data, sample...)
+	data = append(data, key...)
+
+	return crypto.LegacyKeccak256(data)
 }
