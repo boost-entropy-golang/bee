@@ -139,7 +139,7 @@ func NewDevBee(logger log.Logger, o *DevOptions) (b *DevBee, err error) {
 		return nil, fmt.Errorf("eth address: %w", err)
 	}
 
-	var authenticator *auth.Authenticator
+	var authenticator auth.Authenticator
 
 	if o.Restricted {
 		if authenticator, err = auth.New(o.TokenEncryptionKey, o.AdminPasswordHash, logger); err != nil {
@@ -389,7 +389,7 @@ func NewDevBee(logger log.Logger, o *DevOptions) (b *DevBee, err error) {
 		FeedFactory:      mockFeeds,
 		Post:             post,
 		PostageContract:  postageContract,
-		StakingContract:  mockStaking,
+		Staking:          mockStaking,
 		Steward:          mockSteward,
 		SyncStatus:       syncStatusFn,
 	}
