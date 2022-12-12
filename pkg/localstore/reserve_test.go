@@ -646,8 +646,6 @@ func TestReserveSize(t *testing.T) {
 }
 
 func TestComputeReserveSize(t *testing.T) {
-	t.Parallel()
-
 	const chunkCountPerPO = 10
 	const maxPO = 10
 	var chs []swarm.Chunk
@@ -774,6 +772,13 @@ func TestDB_ReserveGC_EvictBatch(t *testing.T) {
 	chunkCount := 100
 
 	var closed chan struct{}
+	testHookEvictChan := make(chan uint64)
+	t.Cleanup(setTestHookEviction(func(collectedCount uint64) {
+		select {
+		case testHookEvictChan <- collectedCount:
+		case <-closed:
+		}
+	}))
 	testHookCollectGarbageChan := make(chan uint64)
 	t.Cleanup(setTestHookCollectGarbage(func(collectedCount uint64) {
 		if collectedCount == 0 {
@@ -813,6 +818,12 @@ func TestDB_ReserveGC_EvictBatch(t *testing.T) {
 	err := db.EvictBatch(stamp.BatchID())
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	select {
+	case <-testHookEvictChan:
+	case <-time.After(10 * time.Second):
+		t.Fatal("reserve eviction timeout")
 	}
 
 	t.Run("reserve size", reserveSizeTest(db, 0, 0))

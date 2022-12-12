@@ -18,6 +18,15 @@ import (
 // EvictBatch will evict all chunks associated with the batch from the reserve. This
 // is used by batch store for expirations.
 func (db *DB) EvictBatch(id []byte) error {
+	db.lock.Lock(lockKeyBatchExpiry)
+	defer db.lock.Unlock(lockKeyBatchExpiry)
+
+	db.expiredBatches = append(db.expiredBatches, id)
+	db.triggerReserveEviction()
+	return nil
+}
+
+func (db *DB) evictBatch(id []byte) error {
 	db.metrics.BatchEvictCounter.Inc()
 	defer func(start time.Time) {
 		totalTimeMetric(db.metrics.TotalTimeBatchEvict, start)

@@ -88,6 +88,8 @@ const (
 	// lockKeySampling is used to synchronize the sampler stopping process if evictions
 	// start during sampling.
 	lockKeySampling string = "sampling"
+	//lockKeyBatchExpiry is used to prevent parallel updates to the expiredBatches in localstore
+	lockKeyBatchExpiry string = "batch-expiry"
 )
 
 // DB is the local store implementation and holds
@@ -206,8 +208,9 @@ type DB struct {
 	logger          log.Logger
 	validStamp      postage.ValidStampFn
 	// following fields are used to synchronize sampling and reserve eviction
-	samplerStop   *sync.Once
-	samplerSignal chan struct{}
+	samplerStop    *sync.Once
+	samplerSignal  chan struct{}
+	expiredBatches [][]byte
 }
 
 // Options struct holds optional parameters for configuring DB.
@@ -317,6 +320,10 @@ func New(path string, baseKey []byte, ss storage.StateStorer, o *Options, logger
 
 	if withinRadiusFn == nil {
 		withinRadiusFn = withinRadius
+	}
+
+	if validChunkFn == nil {
+		validChunkFn = validChunk
 	}
 
 	db.shed, err = shed.NewDB(path, shedOpts)
