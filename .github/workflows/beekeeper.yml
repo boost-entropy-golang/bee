@@ -11,7 +11,7 @@ env:
   K3S_VERSION: "v1.21.14+k3s1"
   REPLICA: 3
   RUN_TYPE: "PR RUN"
-  SETUP_CONTRACT_IMAGE_TAG: "0.9.8"
+  SETUP_CONTRACT_IMAGE_TAG: "0.9.9"
   BEELOCAL_BRANCH: "main"
   BEEKEEPER_BRANCH: "master"
   BEEKEEPER_METRICS_ENABLED: false
@@ -45,8 +45,17 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v3
         with:
-          cache: true
+          cache: false
           go-version-file: go.mod
+      - name: Cache Go Modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
       - name: Get Commit Message
         id: commit
         run: |
@@ -119,15 +128,15 @@ jobs:
       - name: Set local cluster
         run: |
           timeout ${TIMEOUT} make deploylocal BEEKEEPER_CLUSTER=local-dns
-      - name: Test staking
-        id: stake
-        run: timeout ${TIMEOUT} beekeeper check --cluster-name local-dns --checks ci-stake
       - name: Test pingpong
         id: pingpong
         run: timeout ${TIMEOUT} bash -c 'until beekeeper check --cluster-name local-dns --checks ci-pingpong; do echo "waiting for pingpong..."; sleep .3; done'
       - name: Test fullconnectivity
         id: fullconnectivity
         run: timeout ${TIMEOUT} bash -c 'until beekeeper check --cluster-name local-dns --checks=ci-full-connectivity; do echo "waiting for full connectivity..."; sleep .3; done'
+      - name: Test staking
+        id: stake
+        run: timeout ${TIMEOUT} beekeeper check --cluster-name local-dns --checks ci-stake
       - name: Test settlements
         id: settlements
         run: timeout ${TIMEOUT} beekeeper check --cluster-name local-dns --checks=ci-settlements
@@ -160,6 +169,9 @@ jobs:
       - name: Test postage stamps
         id: postage-stamps
         run: timeout ${TIMEOUT} beekeeper check --cluster-name local-dns --checks ci-postage
+      - name: Test staking
+        id: stake
+        run: timeout ${TIMEOUT} beekeeper check --cluster-name local-dns --checks ci-stake
       - name: Collect debug artifacts
         if: failure()
         run: |
