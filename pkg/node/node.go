@@ -24,6 +24,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ethersphere/bee/pkg/chainsync"
+	"github.com/ethersphere/bee/pkg/chainsyncer"
 	"github.com/ethersphere/bee/pkg/storageincentives/redistribution"
 	"github.com/ethersphere/bee/pkg/topology/depthmonitor"
 
@@ -33,7 +35,6 @@ import (
 	"github.com/ethersphere/bee/pkg/addressbook"
 	"github.com/ethersphere/bee/pkg/api"
 	"github.com/ethersphere/bee/pkg/auth"
-	"github.com/ethersphere/bee/pkg/chainsync"
 	"github.com/ethersphere/bee/pkg/config"
 	"github.com/ethersphere/bee/pkg/crypto"
 	"github.com/ethersphere/bee/pkg/feeds/factory"
@@ -82,6 +83,7 @@ import (
 	"github.com/ethersphere/bee/pkg/util/ioutil"
 	"github.com/hashicorp/go-multierror"
 	ma "github.com/multiformats/go-multiaddr"
+	promc "github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/sync/errgroup"
 )
@@ -117,6 +119,7 @@ type Bee struct {
 	postageServiceCloser     io.Closer
 	priceOracleCloser        io.Closer
 	hiveCloser               io.Closer
+	chainSyncerCloser        io.Closer
 	depthMonitorCloser       io.Closer
 	storageIncetivesCloser   io.Closer
 	shutdownInProgress       bool
@@ -581,6 +584,12 @@ func NewBee(ctx context.Context, addr string, publicKey *ecdsa.PublicKey, signer
 		}
 	}
 
+	var registry *promc.Registry
+
+	if debugService != nil {
+		registry = debugService.MetricsRegistry()
+	}
+
 	p2ps, err := libp2p.New(ctx, signer, networkID, swarmAddress, addr, addressbook, stateStore, lightNodes, logger, tracer, libp2p.Options{
 		PrivateKey:      libp2pPrivateKey,
 		NATAddr:         o.NATAddr,
@@ -589,7 +598,7 @@ func NewBee(ctx context.Context, addr string, publicKey *ecdsa.PublicKey, signer
 		FullNode:        o.FullNodeMode,
 		Nonce:           nonce,
 		ValidateOverlay: chainEnabled,
-		Registry:        debugService.MetricsRegistry(),
+		Registry:        registry,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("p2p service: %w", err)
@@ -985,6 +994,8 @@ func NewBee(ctx context.Context, addr string, publicKey *ecdsa.PublicKey, signer
 	)
 	b.resolverCloser = multiResolver
 
+	var chainSyncer *chainsyncer.ChainSyncer
+
 	if o.FullNodeMode {
 		cs, err := chainsync.New(p2ps, chainBackend)
 		if err != nil {
@@ -993,6 +1004,12 @@ func NewBee(ctx context.Context, addr string, publicKey *ecdsa.PublicKey, signer
 		if err = p2ps.AddProtocol(cs.Protocol()); err != nil {
 			return nil, fmt.Errorf("chainsync protocol: %w", err)
 		}
+		chainSyncer, err = chainsyncer.New(chainBackend, cs, kad, p2ps, logger, nil)
+		if err != nil {
+			return nil, fmt.Errorf("new chainsyncer: %w", err)
+		}
+
+		b.chainSyncerCloser = chainSyncer
 	}
 
 	feedFactory := factory.New(ns)
@@ -1207,7 +1224,11 @@ func (b *Bee) Shutdown() error {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(6)
+	wg.Add(7)
+	go func() {
+		defer wg.Done()
+		tryClose(b.chainSyncerCloser, "chain syncer")
+	}()
 	go func() {
 		defer wg.Done()
 		tryClose(b.pssCloser, "pss")
