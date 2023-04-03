@@ -32,15 +32,20 @@ const loggerName = "puller"
 var errCursorsLength = errors.New("cursors length mismatch")
 
 const (
-	DefaultSyncErrorSleepDur = time.Minute
+	intervalPrefix = "sync_interval"
+
+	DefaultSyncErrorSleepDur    = time.Minute
+	DefaultShallowBinsWarmupDur = time.Hour * 24
+
 	recalcPeersDur           = time.Minute * 5
-	histSyncTimeout          = time.Minute * 10
+	histSyncTimeout          = time.Minute * 20
 	histSyncTimeoutBlockList = time.Hour * 24
 )
 
 type Options struct {
-	Bins         uint8
-	SyncSleepDur time.Duration
+	Bins                 uint8
+	SyncSleepDur         time.Duration
+	ShallowBinsWarmupDur time.Duration
 }
 
 type Puller struct {
@@ -60,7 +65,8 @@ type Puller struct {
 
 	wg sync.WaitGroup
 
-	syncErrorSleepDur time.Duration
+	syncErrorSleepDur     time.Duration
+	shallowBinsWarmupTime time.Time
 
 	bins uint8 // how many bins do we support
 
@@ -92,6 +98,8 @@ func New(stateStore storage.StateStorer, topology topology.Driver, reserveState 
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
 
+	p.shallowBinsWarmupTime = time.Now().Add(o.ShallowBinsWarmupDur)
+
 	p.wg.Add(1)
 	go p.manage(ctx, warmupTime)
 	return p
@@ -101,14 +109,14 @@ func (p *Puller) ActiveHistoricalSyncing() uint64 {
 	return p.activeHistoricalSyncing.Load()
 }
 
-func (p *Puller) manage(ctx context.Context, warmupTime time.Duration) {
+func (p *Puller) manage(ctx context.Context, warmupDur time.Duration) {
 	defer p.wg.Done()
 
 	c, unsubscribe := p.topology.SubscribeTopologyChange()
 	defer unsubscribe()
 
 	select {
-	case <-time.After(warmupTime):
+	case <-time.After(warmupDur):
 	case <-ctx.Done():
 		return
 	}
@@ -214,22 +222,12 @@ func (p *Puller) syncPeer(ctx context.Context, peer *syncPeer, storageRadius uin
 
 	/*
 		The syncing behavior diverges for peers outside and winthin the storage radius.
-		For peers with PO lower than the storage radius, we must sync ONLY the bin that is the PO.
 		For neighbor peers, we sync ALL bins greater than or equal to the storage radius.
+		For peers with PO lower than the storage radius, we must sync ONLY the bin that is the PO.
 	*/
 
-	if peer.po < storageRadius {
-		// cancel all non-po bins, if any
-		for bin := uint8(0); bin < p.bins; bin++ {
-			if bin != peer.po {
-				peer.cancelBin(bin)
-			}
-		}
-		// sync PO bin only
-		if !peer.isBinSyncing(peer.po) {
-			p.syncPeerBin(ctx, peer, peer.po, peer.cursors[peer.po])
-		}
-	} else {
+	if peer.po >= storageRadius {
+
 		// cancel all bins lower than the storage radius
 		for bin := uint8(0); bin < storageRadius; bin++ {
 			peer.cancelBin(bin)
@@ -241,6 +239,20 @@ func (p *Puller) syncPeer(ctx context.Context, peer *syncPeer, storageRadius uin
 				p.syncPeerBin(ctx, peer, uint8(bin), cur)
 			}
 		}
+
+	} else if time.Now().After(p.shallowBinsWarmupTime) {
+
+		// cancel all non-po bins, if any
+		for bin := uint8(0); bin < p.bins; bin++ {
+			if bin != peer.po {
+				peer.cancelBin(bin)
+			}
+		}
+		// sync PO bin only
+		if !peer.isBinSyncing(peer.po) {
+			p.syncPeerBin(ctx, peer, peer.po, peer.cursors[peer.po])
+		}
+
 	}
 
 	return nil
@@ -469,11 +481,11 @@ func (p *Puller) getOrCreateInterval(peer swarm.Address, bin uint8) (*intervalst
 }
 
 func peerIntervalKey(peer swarm.Address, bin uint8) string {
-	return fmt.Sprintf("sync|%03d|%s", bin, peer.ByteString())
+	return fmt.Sprintf("%s_%03d_%s", intervalPrefix, bin, peer.ByteString())
 }
 
 func binIntervalKey(bin uint8) string {
-	return fmt.Sprintf("sync|%03d", bin)
+	return fmt.Sprintf("%s_%03d", intervalPrefix, bin)
 }
 
 type syncPeer struct {
