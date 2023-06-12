@@ -744,7 +744,7 @@ func NewBee(
 
 	var swapService *swap.Service
 
-	kad, err := kademlia.New(swarmAddress, addressbook, hive, p2ps, pingPong, logger,
+	kad, err := kademlia.New(swarmAddress, addressbook, hive, p2ps, logger,
 		kademlia.Options{Bootnodes: bootnodes, BootnodeMode: o.BootnodeMode, StaticNodes: o.StaticNodes, IgnoreRadius: !chainEnabled, DataDir: o.DataDir})
 	if err != nil {
 		return nil, fmt.Errorf("unable to create kademlia: %w", err)
@@ -943,7 +943,7 @@ func NewBee(
 	// set the pushSyncer in the PSS
 	pssService.SetPushSyncer(pushSyncProtocol)
 
-	nodeStatus := status.NewService(logger, p2ps, kad, beeNodeMode.String(), batchStore)
+	nodeStatus := status.NewService(logger, p2ps, kad, beeNodeMode.String(), batchStore, localStore)
 	if err = p2ps.AddProtocol(nodeStatus.Protocol()); err != nil {
 		return nil, fmt.Errorf("status service: %w", err)
 	}
@@ -1039,8 +1039,6 @@ func NewBee(
 		b.pullerCloser = pullerService
 
 		localStore.StartReserveWorker(pullerService, networkRadiusFunc)
-
-		nodeStatus.SetStorage(localStore)
 		nodeStatus.SetSync(pullerService)
 
 		if o.EnableStorageIncentives {
