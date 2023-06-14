@@ -15,13 +15,13 @@ import (
 
 	"github.com/ethersphere/bee/pkg/postage"
 	storage "github.com/ethersphere/bee/pkg/storage"
+	"github.com/ethersphere/bee/pkg/storer/internal"
 	"github.com/ethersphere/bee/pkg/swarm"
 )
 
 const (
 	reserveOverCapacity  = "reserveOverCapacity"
 	reserveUnreserved    = "reserveUnreserved"
-	SampleSize           = 8
 	reserveUpdateLockKey = "reserveUpdateLockKey"
 )
 
@@ -152,12 +152,17 @@ func (db *DB) ReservePutter() storage.Putter {
 				db.lock.Lock(reserveUpdateLockKey)
 				defer db.lock.Unlock(reserveUpdateLockKey)
 
-				trx, commit, rollback := db.repo.NewTx(ctx)
-				newIndex, err := db.reserve.Put(ctx, trx, chunk)
+				var (
+					newIndex bool
+				)
+				err = db.Do(ctx, func(trx internal.Storage) error {
+					newIndex, err = db.reserve.Put(ctx, trx, chunk)
+					if err != nil {
+						return fmt.Errorf("reserve: putter.Put: %w", err)
+					}
+					return nil
+				})
 				if err != nil {
-					return fmt.Errorf("reserve: putter.Put: %w", errors.Join(err, rollback()))
-				}
-				if err := commit(); err != nil {
 					return err
 				}
 				if newIndex {
@@ -208,8 +213,6 @@ func (db *DB) evictBatch(ctx context.Context, batchID []byte, upToBin uint8) (er
 			db.lock.Lock(reserveUpdateLockKey)
 			defer db.lock.Unlock(reserveUpdateLockKey)
 
-			txnRepo, commit, rollback := db.repo.NewTx(ctx)
-
 			// cache evicted chunks
 			cache := func(c swarm.Chunk) {
 				if err := db.Cache().Put(ctx, c); err != nil {
@@ -217,14 +220,9 @@ func (db *DB) evictBatch(ctx context.Context, batchID []byte, upToBin uint8) (er
 				}
 			}
 
-			evicted, err := db.reserve.EvictBatchBin(ctx, txnRepo, b, batchID, cache)
+			evicted, err := db.reserve.EvictBatchBin(ctx, db, b, batchID, cache)
 			if err != nil {
-				return fmt.Errorf("reserve.EvictBatchBin: %w", errors.Join(err, rollback()))
-			}
-
-			err = commit()
-			if err != nil {
-				return err
+				return fmt.Errorf("reserve.EvictBatchBin: %w", err)
 			}
 
 			db.logger.Info("reserve eviction", "bin", b, "evicted", evicted, "batchID", hex.EncodeToString(batchID), "size", db.reserve.Size())
