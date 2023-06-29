@@ -47,16 +47,20 @@ func (db *DB) reserveWorker(warmupDur, wakeUpDur time.Duration, radius func() (u
 		return
 	}
 
+	initialRadius := db.reserve.Radius()
+
 	// possibly a fresh node, acquire initial radius externally
-	if db.StorageRadius() == 0 {
+	if initialRadius == 0 {
 		r, err := radius()
 		if err != nil {
 			db.logger.Error(err, "reserve worker initial radius")
 		} else {
-			if err := db.reserve.SetRadius(db.repo.IndexStore(), r); err != nil {
-				db.logger.Error(err, "reserve set radius")
-			}
+			initialRadius = r
 		}
+	}
+
+	if err := db.reserve.SetRadius(db.repo.IndexStore(), initialRadius); err != nil {
+		db.logger.Error(err, "reserve set radius")
 	}
 
 	// syncing can now begin now that the reserver worker is running
@@ -209,33 +213,45 @@ func (db *DB) evictBatch(ctx context.Context, batchID []byte, upToBin uint8) (er
 		default:
 		}
 
-		err := func() error {
-			db.lock.Lock(reserveUpdateLockKey)
-			defer db.lock.Unlock(reserveUpdateLockKey)
+		var evicted int
 
-			// cache evicted chunks
-			cache := func(c swarm.Chunk) {
-				if err := db.Cache().Put(ctx, c); err != nil {
-					db.logger.Error(err, "reserve cache")
+		err = db.reserve.IterateBatchBin(ctx, db.repo, b, batchID, func(address swarm.Address) (bool, error) {
+			err := db.Do(ctx, func(txnRepo internal.Storage) error {
+				chunk, err := db.ChunkStore().Get(ctx, address)
+				if err == nil {
+					err := db.Cache().Put(ctx, chunk)
+					if err != nil {
+						db.logger.Warning("reserve eviction cache put", "err", err)
+					}
 				}
-			}
 
-			evicted, err := db.reserve.EvictBatchBin(ctx, db, b, batchID, cache)
+				db.lock.Lock(reserveUpdateLockKey)
+				defer db.lock.Unlock(reserveUpdateLockKey)
+
+				err = db.reserve.DeleteChunk(ctx, txnRepo, address, batchID)
+				if err != nil {
+					return fmt.Errorf("reserve: delete chunk: %w", err)
+				}
+				return nil
+			})
 			if err != nil {
-				return fmt.Errorf("reserve.EvictBatchBin: %w", err)
+				return false, err
 			}
+			evicted++
+			return false, nil
+		})
 
-			db.logger.Info("reserve eviction", "bin", b, "evicted", evicted, "batchID", hex.EncodeToString(batchID), "size", db.reserve.Size())
+		// if there was an error, we still need to update the chunks that have already
+		// been evicted from the reserve
+		db.logger.Debug("reserve eviction", "bin", b, "evicted", evicted, "batchID", hex.EncodeToString(batchID), "size", db.reserve.Size())
+		db.reserve.AddSize(-evicted)
+		db.metrics.ReserveSize.Set(float64(db.reserve.Size()))
 
-			db.reserve.AddSize(-evicted)
-			db.metrics.ReserveSize.Set(float64(db.reserve.Size()))
-			if upToBin == swarm.MaxBins {
-				db.metrics.ExpiredChunkCount.Add(float64(evicted))
-			} else {
-				db.metrics.EvictedChunkCount.Add(float64(evicted))
-			}
-			return nil
-		}()
+		if upToBin == swarm.MaxBins {
+			db.metrics.ExpiredChunkCount.Add(float64(evicted))
+		} else {
+			db.metrics.EvictedChunkCount.Add(float64(evicted))
+		}
 		if err != nil {
 			return err
 		}
