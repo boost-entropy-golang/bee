@@ -199,11 +199,11 @@ func TestEvictBatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	c, unsub := st.Events().Subscribe("batchExpiryDone")
+	t.Cleanup(unsub)
 	gotUnreserveSignal := make(chan struct{})
 	go func() {
 		defer close(gotUnreserveSignal)
-		c, unsub := st.Events().Subscribe("reserveUnreserved")
-		defer unsub()
 		<-c
 	}()
 	<-gotUnreserveSignal
@@ -239,8 +239,8 @@ func TestEvictBatch(t *testing.T) {
 	}
 
 	for bin, id := range ids {
-		if bin < 3 && id != 9 {
-			t.Fatalf("bin %d got binID %d, want %d", bin, id, 9)
+		if bin < 3 && id != 10 {
+			t.Fatalf("bin %d got binID %d, want %d", bin, id, 10)
 		}
 		if bin >= 3 && id != 0 {
 			t.Fatalf("bin %d  got binID %d, want %d", bin, id, 0)
@@ -509,7 +509,7 @@ func TestSubscribeBin(t *testing.T) {
 		t.Run("subscribe range higher bin", func(t *testing.T) {
 			t.Parallel()
 
-			binC, _, _ := storer.SubscribeBin(context.Background(), 0, 1)
+			binC, _, _ := storer.SubscribeBin(context.Background(), 0, 2)
 
 			i := uint64(1)
 			for c := range binC {
@@ -526,7 +526,7 @@ func TestSubscribeBin(t *testing.T) {
 		t.Run("subscribe beyond range", func(t *testing.T) {
 			t.Parallel()
 
-			binC, _, _ := storer.SubscribeBin(context.Background(), 0, 1)
+			binC, _, _ := storer.SubscribeBin(context.Background(), 0, 2)
 			i := uint64(1)
 			timer := time.After(time.Millisecond * 500)
 
@@ -591,7 +591,7 @@ func TestSubscribeBinTrigger(t *testing.T) {
 			}
 		}
 
-		binC, _, _ := storer.SubscribeBin(context.Background(), 0, 1)
+		binC, _, _ := storer.SubscribeBin(context.Background(), 0, 2)
 		i := uint64(1)
 		timer := time.After(time.Millisecond * 500)
 
