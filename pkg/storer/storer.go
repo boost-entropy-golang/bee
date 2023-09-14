@@ -37,7 +37,6 @@ import (
 	localmigration "github.com/ethersphere/bee/pkg/storer/migration"
 	"github.com/ethersphere/bee/pkg/swarm"
 	"github.com/ethersphere/bee/pkg/topology"
-	"github.com/ethersphere/bee/pkg/util"
 	"github.com/ethersphere/bee/pkg/util/syncutil"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/afero"
@@ -284,6 +283,11 @@ func initDiskRepository(
 		return nil, nil, fmt.Errorf("failed creating levelDB index store: %w", err)
 	}
 
+	err = migration.Migrate(store, "core-migration", localmigration.BeforeIinitSteps())
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed core migration: %w", err)
+	}
+
 	if opts.LdbStats.Load() != nil {
 		go func() {
 			ldbStats := opts.LdbStats.Load()
@@ -492,7 +496,7 @@ type DB struct {
 	directUploadLimiter chan struct{}
 
 	reserve          *reserve.Reserve
-	inFlight         *util.WaitingCounter
+	inFlight         sync.WaitGroup
 	reserveBinEvents *events.Subscriber
 	baseAddr         swarm.Address
 	batchstore       postage.Storer
@@ -560,7 +564,8 @@ func New(ctx context.Context, dirPath string, opts *Options) (*DB, error) {
 	}
 	err = migration.Migrate(
 		repo.IndexStore(),
-		localmigration.AllSteps(sharkyBasePath, sharkyNoOfShards, repo.ChunkStore()),
+		"migration",
+		localmigration.AfterInitSteps(sharkyBasePath, sharkyNoOfShards, repo.ChunkStore()),
 	)
 	if err != nil {
 		return nil, err
@@ -599,7 +604,6 @@ func New(ctx context.Context, dirPath string, opts *Options) (*DB, error) {
 			wakeupDuration: opts.ReserveWakeUpDuration,
 		},
 		directUploadLimiter: make(chan struct{}, pusher.ConcurrentPushes),
-		inFlight:            new(util.WaitingCounter),
 	}
 
 	if db.validStamp == nil {
@@ -660,7 +664,7 @@ func (db *DB) Close() error {
 	bgReserveWorkersClosed := make(chan struct{})
 	go func() {
 		defer close(bgReserveWorkersClosed)
-		if c := db.inFlight.Wait(5 * time.Second); c > 0 {
+		if !syncutil.WaitWithTimeout(&db.inFlight, 2*time.Second) {
 			db.logger.Warning("db shutting down with running goroutines")
 		}
 	}()
