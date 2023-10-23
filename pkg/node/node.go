@@ -95,6 +95,7 @@ type Bee struct {
 	errorLogWriter           io.Writer
 	tracerCloser             io.Closer
 	stateStoreCloser         io.Closer
+	stamperStoreCloser       io.Closer
 	localstoreCloser         io.Closer
 	topologyCloser           io.Closer
 	topologyHalter           topology.Halter
@@ -389,6 +390,7 @@ func NewBee(
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize stamper store: %w", err)
 	}
+	b.stamperStoreCloser = stamperStore
 
 	var debugService *api.Service
 
@@ -710,26 +712,6 @@ func NewBee(
 		return nil, err
 	}
 
-	if natManager := p2ps.NATManager(); natManager != nil {
-		// wait for nat manager to init
-		logger.Debug("initializing NAT manager")
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-natManager.Ready():
-			// this is magic sleep to give NAT time to sync the mappings
-			// this is a hack, kind of alchemy and should be improved
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(3 * time.Second):
-			}
-			logger.Debug("NAT manager initialized")
-		case <-time.After(10 * time.Second):
-			logger.Warning("NAT manager init timeout")
-		}
-	}
-
 	// Construct protocols.
 	pingPong := pingpong.New(p2ps, logger, tracer)
 
@@ -950,7 +932,7 @@ func NewBee(
 		return nil, fmt.Errorf("status service: %w", err)
 	}
 
-	saludService := salud.New(nodeStatus, kad, localStore, logger, warmupTime, api.FullMode.String(), salud.DefaultMinPeersPerBin)
+	saludService := salud.New(nodeStatus, kad, localStore, logger, warmupTime, api.FullMode.String(), salud.DefaultMinPeersPerBin, salud.DefaultPercentile)
 	b.saludCloser = saludService
 
 	rC, unsub := saludService.SubscribeNetworkStorageRadius()
@@ -1380,6 +1362,7 @@ func (b *Bee) Shutdown() error {
 	tryClose(b.topologyCloser, "topology driver")
 	tryClose(b.storageIncetivesCloser, "storage incentives agent")
 	tryClose(b.stateStoreCloser, "statestore")
+	tryClose(b.stamperStoreCloser, "stamperstore")
 	tryClose(b.localstoreCloser, "localstore")
 	tryClose(b.resolverCloser, "resolver service")
 
