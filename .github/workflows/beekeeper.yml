@@ -13,7 +13,7 @@ env:
   RUN_TYPE: "PR RUN"
   SETUP_CONTRACT_IMAGE_TAG: "0.9.9"
   BEELOCAL_BRANCH: "main"
-  BEEKEEPER_BRANCH: "master"
+  BEEKEEPER_BRANCH: "settlements-fix"
   BEEKEEPER_METRICS_ENABLED: false
   REACHABILITY_OVERRIDE_PUBLIC: true
   BATCHFACTOR_OVERRIDE_PUBLIC: 2
@@ -70,6 +70,7 @@ jobs:
           # patch pkg/postage/postagecontract/contract.go .github/patches/postagecontract.patch
           # patch pkg/postage/service.go .github/patches/postageservice.patch
           patch pkg/api/postage.go .github/patches/postage_api.patch
+          patch pkg/retrieval/retrieval.go .github/patches/retrieval.patch
           make binary
           mv dist/bee bee-1
       - name: Apply patches and build - 2

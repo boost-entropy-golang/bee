@@ -120,7 +120,7 @@ func (s *Service) Protocol() p2p.ProtocolSpec {
 }
 
 const (
-	retrieveChunkTimeout = time.Second * 10
+	retrieveChunkTimeout = time.Second * 30
 	preemptiveInterval   = time.Second
 	overDraftRefresh     = time.Millisecond * 600
 	skiplistDur          = time.Minute
@@ -178,7 +178,7 @@ func (s *Service) RetrieveChunk(ctx context.Context, chunkAddr, sourcePeerAddr s
 		}
 
 		resultC := make(chan retrievalResult, 1)
-		retryC := make(chan struct{}, forwards)
+		retryC := make(chan struct{}, forwards+1)
 
 		retry := func() {
 			select {
