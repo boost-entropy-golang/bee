@@ -172,6 +172,7 @@ type Options struct {
 	StatestoreCacheCapacity       uint64
 	TargetNeighborhood            string
 	NeighborhoodSuggester         string
+	WhitelistedWithdrawalAddress  []string
 }
 
 const (
@@ -253,7 +254,7 @@ func NewBee(
 	}
 	b.stateStoreCloser = stateStore
 
-	// Check if the the batchstore exists. If not, we can assume it's missing
+	// Check if the batchstore exists. If not, we can assume it's missing
 	// due to a migration or it's a fresh install.
 	batchStoreExists, err := batchStoreExists(stateStore)
 	if err != nil {
@@ -421,6 +422,7 @@ func NewBee(
 			*publicKey,
 			pssPrivateKey.PublicKey,
 			overlayEthAddress,
+			o.WhitelistedWithdrawalAddress,
 			logger,
 			transactionService,
 			batchStore,
@@ -460,6 +462,7 @@ func NewBee(
 			*publicKey,
 			pssPrivateKey.PublicKey,
 			overlayEthAddress,
+			o.WhitelistedWithdrawalAddress,
 			logger,
 			transactionService,
 			batchStore,
@@ -1094,7 +1097,7 @@ func NewBee(
 
 	if o.APIAddr != "" {
 		if apiService == nil {
-			apiService = api.New(*publicKey, pssPrivateKey.PublicKey, overlayEthAddress, logger, transactionService, batchStore, beeNodeMode, o.ChequebookEnable, o.SwapEnable, chainBackend, o.CORSAllowedOrigins, stamperStore)
+			apiService = api.New(*publicKey, pssPrivateKey.PublicKey, overlayEthAddress, o.WhitelistedWithdrawalAddress, logger, transactionService, batchStore, beeNodeMode, o.ChequebookEnable, o.SwapEnable, chainBackend, o.CORSAllowedOrigins, stamperStore)
 			apiService.SetProbe(probe)
 			apiService.SetRedistributionAgent(agent)
 		}
