@@ -11,10 +11,10 @@ import (
 	"net/http/pprof"
 	"strings"
 
-	"github.com/ethersphere/bee/pkg/auth"
-	"github.com/ethersphere/bee/pkg/jsonhttp"
-	"github.com/ethersphere/bee/pkg/log/httpaccess"
-	"github.com/ethersphere/bee/pkg/swarm"
+	"github.com/ethersphere/bee/v2/pkg/auth"
+	"github.com/ethersphere/bee/v2/pkg/jsonhttp"
+	"github.com/ethersphere/bee/v2/pkg/log/httpaccess"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -315,6 +315,12 @@ func (s *Service) mountAPI() {
 		})),
 	)
 
+	handle("/pins/check", web.ChainHandlers(
+		web.FinalHandler(jsonhttp.MethodHandler{
+			"GET": http.HandlerFunc(s.pinIntegrityHandler),
+		}),
+	))
+
 	handle("/pins/{reference}", web.ChainHandlers(
 		web.FinalHandler(jsonhttp.MethodHandler{
 			"GET":    http.HandlerFunc(s.getPinnedRootHash),
@@ -606,12 +612,6 @@ func (s *Service) mountBusinessDebug(restricted bool) {
 	handle("/rchash/{depth}/{anchor1}/{anchor2}", web.ChainHandlers(
 		web.FinalHandler(jsonhttp.MethodHandler{
 			"GET": http.HandlerFunc(s.rchash),
-		}),
-	))
-
-	handle("/check/pin", web.ChainHandlers(
-		web.FinalHandler(jsonhttp.MethodHandler{
-			"GET": http.HandlerFunc(s.pinIntegrityHandler),
 		}),
 	))
 }
