@@ -170,7 +170,7 @@ type Options struct {
 	NeighborhoodSuggester         string
 	WhitelistedWithdrawalAddress  []string
 	TrxDebugMode                  bool
-	ReserveMinimumRadius          uint
+	MinimumStorageRadius          uint
 }
 
 const (
@@ -293,7 +293,7 @@ func NewBee(
 			}
 
 			if nonceExists {
-				logger.Info("Override nonce %d to %d and clean state for neighborhood %s", nonce, newNonce, targetNeighborhood)
+				logger.Info("Override nonce %x to %x and clean state for neighborhood %s", nonce, newNonce, targetNeighborhood)
 				logger.Warning("you have another 10 seconds to change your mind and kill this process with CTRL-C...")
 				time.Sleep(10 * time.Second)
 
@@ -718,6 +718,7 @@ func NewBee(
 		Logger:                    logger,
 		Tracer:                    tracer,
 		CacheMinEvictCount:        cacheMinEvictCount,
+		MinimumStorageRadius:      o.MinimumStorageRadius,
 	}
 
 	if o.FullNodeMode && !o.BootnodeMode {
@@ -757,11 +758,12 @@ func NewBee(
 		logger.Info("waiting to sync postage contract data, this may take a while... more info available in Debug loglevel")
 
 		paused, err := postageStampContractService.Paused(ctx)
-		if paused {
-			return nil, fmt.Errorf("postage contract is paused: %w", err)
-		}
 		if err != nil {
 			logger.Error(err, "Error checking postage contract is paused")
+		}
+
+		if paused {
+			return nil, errors.New("postage contract is paused")
 		}
 
 		if o.FullNodeMode {
@@ -926,8 +928,8 @@ func NewBee(
 		}
 
 		local, network := localStore.StorageRadius(), uint8(networkR.Load())
-		if local <= uint8(o.ReserveMinimumRadius) {
-			return network, nil
+		if local <= uint8(o.MinimumStorageRadius) {
+			return max(network, uint8(o.MinimumStorageRadius)), nil
 		} else {
 			return local, nil
 		}
