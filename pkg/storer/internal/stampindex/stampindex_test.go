@@ -106,7 +106,7 @@ func TestStampIndexItem(t *testing.T) {
 	}
 }
 
-func TestStoreLoadDelete(t *testing.T) {
+func TestStoreLoadDeleteWithStamp(t *testing.T) {
 	t.Parallel()
 
 	ts := newTestStorage(t)
@@ -153,7 +153,7 @@ func TestStoreLoadDelete(t *testing.T) {
 				want.StampTimestamp = chunk.Stamp().Timestamp()
 				want.ChunkAddress = chunk.Address()
 
-				have, err := stampindex.Load(ts.IndexStore(), ns, chunk)
+				have, err := stampindex.Load(ts.IndexStore(), ns, chunk.Stamp())
 				if err != nil {
 					t.Fatalf("Load(...): unexpected error: %v", err)
 				}
@@ -166,13 +166,13 @@ func TestStoreLoadDelete(t *testing.T) {
 			t.Run("delete stored stamp index", func(t *testing.T) {
 
 				err := ts.Run(context.Background(), func(s transaction.Store) error {
-					return stampindex.Delete(s.IndexStore(), ns, chunk)
+					return stampindex.Delete(s.IndexStore(), ns, chunk.Stamp())
 				})
 				if err != nil {
 					t.Fatalf("Delete(...): unexpected error: %v", err)
 				}
 
-				have, err := stampindex.Load(ts.IndexStore(), ns, chunk)
+				have, err := stampindex.Load(ts.IndexStore(), ns, chunk.Stamp())
 				if have != nil {
 					t.Fatalf("Load(...): unexpected item %v", have)
 				}
