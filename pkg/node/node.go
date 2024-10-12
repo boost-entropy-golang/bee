@@ -489,19 +489,19 @@ func NewBee(
 		}
 	}
 
+	chequebookFactory, err = InitChequebookFactory(logger, chainBackend, chainID, transactionService, o.SwapFactoryAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	erc20Address, err := chequebookFactory.ERC20Address(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("factory fail: %w", err)
+	}
+
+	erc20Service = erc20.New(transactionService, erc20Address)
+
 	if o.SwapEnable {
-		chequebookFactory, err = InitChequebookFactory(logger, chainBackend, chainID, transactionService, o.SwapFactoryAddress)
-		if err != nil {
-			return nil, err
-		}
-
-		erc20Address, err := chequebookFactory.ERC20Address(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("factory fail: %w", err)
-		}
-
-		erc20Service = erc20.New(transactionService, erc20Address)
-
 		if o.ChequebookEnable && chainEnabled {
 			chequebookService, err = InitChequebookService(
 				ctx,
@@ -1002,7 +1002,7 @@ func NewBee(
 		stakingContractAddress = common.HexToAddress(o.StakingContractAddress)
 	}
 
-	stakingContract := staking.New(overlayEthAddress, stakingContractAddress, abiutil.MustParseABI(chainCfg.StakingABI), bzzTokenAddress, transactionService, common.BytesToHash(nonce), o.TrxDebugMode)
+	stakingContract := staking.New(overlayEthAddress, stakingContractAddress, abiutil.MustParseABI(chainCfg.StakingABI), bzzTokenAddress, transactionService, common.BytesToHash(nonce), o.TrxDebugMode, uint8(o.ReserveCapacityDoubling))
 
 	if chainEnabled && changedOverlay {
 		stake, err := stakingContract.GetPotentialStake(ctx)
