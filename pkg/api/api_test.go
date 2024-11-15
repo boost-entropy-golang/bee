@@ -131,6 +131,9 @@ type testServerOptions struct {
 	NodeStatus          *status.Service
 	PinIntegrity        api.PinIntegrity
 	WhitelistedAddr     string
+	FullAPIDisabled     bool
+	ChequebookDisabled  bool
+	SwapDisabled        bool
 }
 
 func newTestServer(t *testing.T, o testServerOptions) (*http.Client, *websocket.Conn, string, *chanStorer) {
@@ -179,7 +182,7 @@ func newTestServer(t *testing.T, o testServerOptions) (*http.Client, *websocket.
 	erc20 := erc20mock.New(o.Erc20Opts...)
 	backend := backendmock.New(o.BackendOpts...)
 
-	var extraOpts = api.ExtraOptions{
+	extraOpts := api.ExtraOptions{
 		TopologyDriver:  topologyDriver,
 		Accounting:      acc,
 		Pseudosettle:    recipient,
@@ -207,7 +210,7 @@ func newTestServer(t *testing.T, o testServerOptions) (*http.Client, *websocket.
 		o.BeeMode = api.FullMode
 	}
 
-	s := api.New(o.PublicKey, o.PSSPublicKey, o.EthereumAddress, []string{o.WhitelistedAddr}, o.Logger, transaction, o.BatchStore, o.BeeMode, true, true, backend, o.CORSAllowedOrigins, inmemstore.New())
+	s := api.New(o.PublicKey, o.PSSPublicKey, o.EthereumAddress, []string{o.WhitelistedAddr}, o.Logger, transaction, o.BatchStore, o.BeeMode, !o.ChequebookDisabled, !o.SwapDisabled, backend, o.CORSAllowedOrigins, inmemstore.New())
 	testutil.CleanupCloser(t, s)
 
 	s.SetP2P(o.P2P)
@@ -231,9 +234,10 @@ func newTestServer(t *testing.T, o testServerOptions) (*http.Client, *websocket.
 		WsPingPeriod:       o.WsPingPeriod,
 	}, extraOpts, 1, erc20)
 
-	s.MountTechnicalDebug()
-	s.MountDebug()
-	s.MountAPI()
+	s.Mount()
+	if !o.FullAPIDisabled {
+		s.EnableFullAPI()
+	}
 
 	if o.DirectUpload {
 		chanStore = newChanStore(o.Storer.PusherFeed())
@@ -316,7 +320,7 @@ func TestParseName(t *testing.T) {
 	const bzzHash = "89c17d0d8018a19057314aa035e61c9d23c47581a61dd3a79a7839692c617e4d"
 	log := log.Noop
 
-	var errInvalidNameOrAddress = errors.New("invalid name or bzz address")
+	errInvalidNameOrAddress := errors.New("invalid name or bzz address")
 
 	testCases := []struct {
 		desc       string
@@ -377,9 +381,9 @@ func TestParseName(t *testing.T) {
 
 		s := api.New(pk.PublicKey, pk.PublicKey, common.Address{}, nil, log, nil, nil, 1, false, false, nil, []string{"*"}, inmemstore.New())
 		s.Configure(signer, nil, api.Options{}, api.ExtraOptions{Resolver: tC.res}, 1, nil)
-		s.MountAPI()
+		s.Mount()
+		s.EnableFullAPI()
 
-		tC := tC
 		t.Run(tC.desc, func(t *testing.T) {
 			t.Parallel()
 
@@ -448,7 +452,6 @@ func TestPostageHeaderError(t *testing.T) {
 	)
 	content := []byte{7: 0} // 8 zeros
 	for _, endpoint := range endpoints {
-		endpoint := endpoint
 		t.Run(endpoint+": empty batch", func(t *testing.T) {
 			t.Parallel()
 
@@ -503,9 +506,7 @@ func TestPostageHeaderError(t *testing.T) {
 func TestOptions(t *testing.T) {
 	t.Parallel()
 
-	var (
-		client, _, _, _ = newTestServer(t, testServerOptions{})
-	)
+	client, _, _, _ := newTestServer(t, testServerOptions{})
 	for _, tc := range []struct {
 		endpoint        string
 		expectedMethods string // expectedMethods contains HTTP methods like GET, POST, HEAD, PATCH, DELETE, OPTIONS. These are in alphabetical sorted order
@@ -535,7 +536,6 @@ func TestOptions(t *testing.T) {
 			expectedMethods: "GET, HEAD",
 		},
 	} {
-		tc := tc
 		t.Run(tc.endpoint+" options test", func(t *testing.T) {
 			t.Parallel()
 
@@ -552,8 +552,6 @@ func TestPostageDirectAndDeferred(t *testing.T) {
 	t.Parallel()
 
 	for _, endpoint := range []string{"bytes", "bzz", "chunks"} {
-		endpoint := endpoint
-
 		if endpoint != "chunks" {
 			t.Run(endpoint+" deferred", func(t *testing.T) {
 				t.Parallel()
@@ -709,7 +707,6 @@ func createRedistributionAgentService(
 		tranService,
 		&mockHealth{},
 		log.Noop,
-		0,
 	)
 }
 

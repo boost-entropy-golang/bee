@@ -450,7 +450,8 @@ func NewBee(
 			o.CORSAllowedOrigins,
 			stamperStore,
 		)
-		apiService.MountTechnicalDebug()
+
+		apiService.Mount()
 		apiService.SetProbe(probe)
 
 		apiService.SetSwarmAddress(&swarmAddress)
@@ -906,7 +907,7 @@ func NewBee(
 		return nil, fmt.Errorf("status service: %w", err)
 	}
 
-	saludService := salud.New(nodeStatus, kad, localStore, logger, warmupTime, api.FullMode.String(), salud.DefaultMinPeersPerBin, salud.DefaultDurPercentile, salud.DefaultConnsPercentile, uint8(o.ReserveCapacityDoubling))
+	saludService := salud.New(nodeStatus, kad, localStore, logger, warmupTime, api.FullMode.String(), salud.DefaultMinPeersPerBin, salud.DefaultDurPercentile, salud.DefaultConnsPercentile)
 	b.saludCloser = saludService
 
 	rC, unsub := saludService.SubscribeNetworkStorageRadius()
@@ -1061,12 +1062,14 @@ func NewBee(
 				redistributionContractAddress = common.HexToAddress(o.RedistributionContractAddress)
 			}
 
+			redistributionContract := redistribution.New(swarmAddress, overlayEthAddress, logger, transactionService, redistributionContractAddress, abiutil.MustParseABI(chainCfg.RedistributionABI), o.TrxDebugMode)
+
+			startWarmupPeriod := time.Now()
 			isFullySynced := func() bool {
 				reserveTreshold := reserveCapacity * 5 / 10
-				return localStore.ReserveSize() >= reserveTreshold && pullerService.SyncRate() == 0
+				return localStore.ReserveSize() >= reserveTreshold && pullerService.SyncRate() == 0 && time.Now().After(startWarmupPeriod.Add(warmupTime))
 			}
 
-			redistributionContract := redistribution.New(swarmAddress, overlayEthAddress, logger, transactionService, redistributionContractAddress, abiutil.MustParseABI(chainCfg.RedistributionABI), o.TrxDebugMode)
 			agent, err = storageincentives.New(
 				swarmAddress,
 				overlayEthAddress,
@@ -1085,7 +1088,6 @@ func NewBee(
 				transactionService,
 				saludService,
 				logger,
-				uint8(o.ReserveCapacityDoubling),
 			)
 			if err != nil {
 				return nil, fmt.Errorf("storage incentives agent: %w", err)
@@ -1178,8 +1180,7 @@ func NewBee(
 			WsPingPeriod:       60 * time.Second,
 		}, extraOpts, chainID, erc20Service)
 
-		apiService.MountDebug()
-		apiService.MountAPI()
+		apiService.EnableFullAPI()
 
 		apiService.SetRedistributionAgent(agent)
 	}
