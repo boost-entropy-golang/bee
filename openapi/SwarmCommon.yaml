@@ -29,6 +29,8 @@ components:
             $ref: "#/components/schemas/P2PUnderlay"
         ethereum:
           $ref: "#/components/schemas/EthereumAddress"
+        chain_address:
+          $ref: "#/components/schemas/EthereumAddress"
         publicKey:
           $ref: "#/components/schemas/PublicKey"
         pssPublicKey:
@@ -897,6 +899,8 @@ components:
       properties:
         overlay:
           $ref: "#/components/schemas/SwarmAddress"
+        proximity:
+          type: integer
         beeMode:
           type: string
           enum:
@@ -905,8 +909,6 @@ components:
             - "dev"
             - "ultra-light"
             - "unknown"
-        proximity:
-          type: integer
         reserveSize:
           type: integer
         reserveSizeWithinRadius:
@@ -922,7 +924,7 @@ components:
         requestFailed:
           nullable: true
           type: boolean
-        BatchCommitment:
+        batchCommitment:
           type: integer
         isReachable:
           type: boolean
@@ -931,10 +933,10 @@ components:
         committedDepth:
           type: integer
 
-    StatusResponse:
+    StatusPeersResponse:
       type: object
       properties:
-        stamps:
+        snapshots:
           type: array
           nullable: false
           items:
@@ -958,7 +960,7 @@ components:
     StatusNeighborhoodsResponse:
       type: object
       properties:
-        stamps:
+        neighborhoods:
           type: array
           nullable: false
           items:
